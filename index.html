@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Email Sorter</title>
+
+  <!-- ════════════════════════════════════════════════════════════
+    STEP 1 — Paste your Google OAuth Client ID below.
+    Get it from: console.cloud.google.com
+    → APIs & Services → Credentials → Create OAuth Client ID
+    → Application type: Web application
+    → Authorised JavaScript origins: https://YOUR_USERNAME.github.io
+    ════════════════════════════════════════════════════════════ -->
+  <meta name="google-client-id" content="YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com" />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: ['class', '[data-theme="dark"]'],
+      theme: {
+        extend: {
+          colors: { slatex: '#0F172A', accent: '#3B82F6', success: '#10B981', danger: '#F97316', spam: '#EF4444' },
+          boxShadow: { soft: '0 10px 30px rgba(15,23,42,0.12)' }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Google Identity Services — client-side OAuth, no backend needed -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    :root { color-scheme: light; }
+    [data-theme="dark"] { color-scheme: dark; }
+    body { font-family: 'Inter', sans-serif; }
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    .sidebar-link.active { background: linear-gradient(135deg,rgba(59,130,246,.18),rgba(59,130,246,.08)); border-color: rgba(59,130,246,.35); color: #3B82F6; }
+    .email-row.active { border-color: rgba(59,130,246,.45); background: rgba(59,130,246,.08); }
+    .toast-show { animation: slideUp .35s ease forwards; }
+    @keyframes slideUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 transition-colors duration-300 dark:bg-slate-950 dark:text-slate-100">
+
+<!-- ── SKIP LINK ── -->
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-slate-900">Skip to content</a>
+
+<!-- ── AUTH BANNER ── -->
+<div id="authBanner" class="flex items-center justify-between gap-3 bg-blue-600 px-4 py-3 text-sm font-medium text-white sm:px-6 lg:px-8">
+  <div class="flex items-center gap-2">
+    <i data-lucide="info" class="h-4 w-4 shrink-0"></i>
+    <span>Connect your Gmail to load real emails. Currently showing demo data.</span>
+  </div>
+  <button onclick="signIn()" class="shrink-0 rounded-xl bg-white/20 px-3 py-1.5 text-xs font-semibold hover:bg-white/30">Connect Gmail</button>
+</div>
+
+<div class="min-h-screen lg:flex">
+
+  <!-- ══════════════════════════════════════════════════════════
+       SIDEBAR
+  ══════════════════════════════════════════════════════════ -->
+  <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-72 -translate-x-full border-r border-slate-200 bg-white/90 p-5 shadow-soft transition-transform duration-300 dark:border-slate-800 dark:bg-slate-900/90 lg:translate-x-0 overflow-y-auto">
+
+    <!-- Logo -->
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900">
+          <svg viewBox="0 0 48 48" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2.6">
+            <path d="M8 16L24 8l16 8-16 8-16-8Z"/><path d="M8 16v16l16 8 16-8V16"/><path d="m16 20 8 4 8-4"/>
+          </svg>
+        </div>
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[.24em] text-slate-500">Smart Email</p>
+          <h1 class="text-lg font-semibold">Sorter</h1>
+        </div>
+      </div>
+      <button id="closeSidebar" class="rounded-xl p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden">
+        <i data-lucide="x" class="h-5 w-5"></i>
+      </button>
+    </div>
+
+    <!-- Nav -->
+    <nav class="mt-8 space-y-2">
+      <button data-view="overview" class="sidebar-link active flex w-full items-center gap-3 rounded-2xl border border-transparent px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        <i data-lucide="layout-dashboard" class="h-4 w-4"></i><span>Dashboard Overview</span>
+      </button>
+      <button data-view="inbox" class="sidebar-link flex w-full items-center gap-3 rounded-2xl border border-transparent px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        <i data-lucide="inbox" class="h-4 w-4"></i><span>Smart Sorter Inbox</span>
+      </button>
+      <button data-view="unsubscriber" class="sidebar-link flex w-full items-center gap-3 rounded-2xl border border-transparent px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        <i data-lucide="user-x" class="h-4 w-4"></i><span>One-Click Unsubscriber</span>
+      </button>
+      <button data-view="analyzer" class="sidebar-link flex w-full items-center gap-3 rounded-2xl border border-transparent px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        <i data-lucide="shield-alert" class="h-4 w-4"></i><span>Trash & Spam Analyzer</span>
+      </button>
+      <button data-view="setup" class="sidebar-link flex w-full items-center gap-3 rounded-2xl border border-transparent px-4 py-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
+        <i data-lucide="settings" class="h-4 w-4"></i><span>Setup Guide</span>
+      </button>
+    </nav>
+
+    <!-- Connect card -->
+    <div class="mt-8 rounded-3xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/50">
+      <p class="text-xs font-semibold uppercase tracking-[.2em] text-slate-500">Connect inbox</p>
+
+      <!-- Logged out -->
+      <div id="sidebarLoggedOut">
+        <p class="mt-2 text-sm text-slate-600 dark:text-slate-300">Sign in with Google to load your real inbox securely.</p>
+        <button onclick="signIn()" class="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-accent px-4 py-3 text-sm font-semibold text-white hover:bg-blue-500 transition-colors">
+          <svg class="h-4 w-4" viewBox="0 0 24 24"><path fill="#fff" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#fff" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#fff" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#fff" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          Sign in with Google
+        </button>
+      </div>
+
+      <!-- Logged in -->
+      <div id="sidebarLoggedIn" class="hidden">
+        <div class="mt-3 flex items-center gap-3">
+          <img id="sidebarAvatar" src="" alt="" class="h-9 w-9 rounded-full border-2 border-blue-400 object-cover" />
+          <div class="min-w-0">
+            <p id="sidebarName" class="truncate text-sm font-semibold"></p>
+            <p id="sidebarEmail" class="truncate text-xs text-slate-500"></p>
+          </div>
+        </div>
+        <div class="mt-4 space-y-2">
+          <button onclick="fetchEmails()" class="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-600 transition-colors">
+            <i data-lucide="refresh-cw" class="h-4 w-4"></i> Sync Inbox
+          </button>
+          <button onclick="signOut()" class="flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-300 px-4 py-3 text-sm font-semibold dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+            <i data-lucide="log-out" class="h-4 w-4"></i> Sign Out
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════════════════════════════════════════════════════════
+       MAIN CONTENT
+  ══════════════════════════════════════════════════════════ -->
+  <div class="flex min-h-screen flex-1 flex-col lg:ml-72">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/80 px-4 py-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/80 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <button id="openSidebar" class="rounded-2xl border border-slate-200 p-2 dark:border-slate-700 lg:hidden">
+            <i data-lucide="panel-left-open" class="h-5 w-5"></i>
+          </button>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[.24em] text-slate-500">AI cleanup control center</p>
+            <h2 id="headerTitle" class="text-xl font-semibold">Dashboard Overview</h2>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <div id="headerPill" class="hidden items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-800 dark:bg-emerald-900/20 sm:flex">
+            <div class="h-2 w-2 rounded-full bg-emerald-500"></div>
+            <span id="headerPillName" class="text-xs font-semibold text-emerald-700 dark:text-emerald-400"></span>
+          </div>
+          <button id="themeToggle" class="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"></button>
+          <button onclick="fetchEmails()" class="hidden rounded-2xl bg-accent px-4 py-3 text-sm font-semibold text-white shadow-soft sm:block hover:bg-blue-500 transition-colors">Run Smart Sweep</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+
+      <!-- ── OVERVIEW PANEL ── -->
+      <section data-panel="overview" class="space-y-6">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900"><p class="text-sm text-slate-500">Emails processed</p><p id="statTotal" class="mt-4 text-3xl font-bold">—</p><p class="mt-2 text-sm text-emerald-500" id="statTotalSub">Connect Gmail to load</p></div>
+          <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900"><p class="text-sm text-slate-500">Unsubscribed</p><p class="mt-4 text-3xl font-bold">246</p><p class="mt-2 text-sm text-orange-500">32 newsletters removed</p></div>
+          <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900"><p class="text-sm text-slate-500">Spam blocked</p><p class="mt-4 text-3xl font-bold">92%</p><p class="mt-2 text-sm text-red-500">14 phishing attempts flagged</p></div>
+          <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900"><p class="text-sm text-slate-500">Space saved</p><p class="mt-4 text-3xl font-bold">3.8 GB</p><p class="mt-2 text-sm text-blue-500">Across inbox, trash & spam</p></div>
+        </div>
+        <div class="grid gap-6 xl:grid-cols-[1.55fr_0.95fr]">
+          <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+            <div class="flex items-start justify-between gap-4">
+              <div><h3 class="text-lg font-semibold">Email Categories</h3><p class="mt-1 text-sm text-slate-500">Distribution of your inbox.</p></div>
+              <span id="chartBadge" class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-600 dark:bg-blue-500/10 dark:text-blue-300">Demo data</span>
+            </div>
+            <div class="mt-6 h-80"><canvas id="categoryChart"></canvas></div>
+          </div>
+          <div class="space-y-6">
+            <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+              <h3 class="text-lg font-semibold">Automation Pulse</h3>
+              <div class="mt-5 space-y-4">
+                <div><div class="mb-2 flex justify-between text-sm"><span>Sorting accuracy</span><span>96%</span></div><div class="h-2 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-2 w-[96%] rounded-full bg-accent"></div></div></div>
+                <div><div class="mb-2 flex justify-between text-sm"><span>Unsubscribe success</span><span>88%</span></div><div class="h-2 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-2 w-[88%] rounded-full bg-orange-500"></div></div></div>
+                <div><div class="mb-2 flex justify-between text-sm"><span>Spam confidence</span><span>93%</span></div><div class="h-2 rounded-full bg-slate-100 dark:bg-slate-800"><div class="h-2 w-[93%] rounded-full bg-emerald-500"></div></div></div>
+              </div>
+            </div>
+            <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+              <h3 class="text-lg font-semibold">Recent actions</h3>
+              <ul class="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-300">
+                <li class="flex items-center justify-between"><span>Promotions archived</span><span>418</span></li>
+                <li class="flex items-center justify-between"><span>Bulk newsletters reviewed</span><span>78</span></li>
+                <li class="flex items-center justify-between"><span>Phishing emails isolated</span><span>14</span></li>
+                <li class="flex items-center justify-between"><span>Attachment storage recovered</span><span>1.2 GB</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INBOX PANEL ── -->
+      <section data-panel="inbox" class="hidden space-y-5">
+        <!-- Loading -->
+        <div id="inboxLoading" class="hidden flex-col items-center justify-center gap-4 py-20">
+          <div class="h-10 w-10 spin rounded-full border-4 border-slate-200 border-t-blue-500"></div>
+          <p class="text-sm font-medium text-slate-500">Fetching your emails from Gmail…</p>
+        </div>
+        <!-- Not connected -->
+        <div id="inboxEmpty" class="flex flex-col items-center justify-center gap-5 rounded-3xl border border-dashed border-slate-300 bg-white py-20 dark:border-slate-700 dark:bg-slate-900">
+          <div class="flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-50 dark:bg-blue-900/20">
+            <i data-lucide="mail" class="h-8 w-8 text-blue-500"></i>
+          </div>
+          <div class="text-center">
+            <h3 class="text-lg font-semibold">No inbox connected</h3>
+            <p class="mt-1 text-sm text-slate-500">Sign in with Google to load your real emails.</p>
+          </div>
+          <button onclick="signIn()" class="flex items-center gap-2 rounded-2xl bg-accent px-6 py-3 text-sm font-semibold text-white hover:bg-blue-500 transition-colors">
+            <i data-lucide="log-in" class="h-4 w-4"></i> Connect Gmail
+          </button>
+        </div>
+        <!-- Email list + preview -->
+        <div id="inboxContent" class="hidden gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div class="rounded-3xl border border-slate-200 bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+            <div class="flex flex-wrap gap-2" id="categoryTabs"></div>
+            <div id="emailList" class="mt-4 max-h-[70vh] space-y-3 overflow-auto pr-1 scrollbar-hide"></div>
+          </div>
+          <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-800">
+              <div>
+                <p class="text-sm text-slate-500">Selected message</p>
+                <h3 id="previewSubject" class="mt-1 text-2xl font-semibold">Open an email to preview</h3>
+              </div>
+              <div class="flex items-center gap-2 text-sm text-slate-500"><i data-lucide="sparkles" class="h-4 w-4"></i><span>AI summary enabled</span></div>
+            </div>
+            <div class="mt-5 space-y-4">
+              <div class="flex flex-wrap gap-4 text-sm text-slate-500">
+                <span id="previewFrom">From: —</span>
+                <span id="previewTime">Time: —</span>
+              </div>
+              <div id="previewBody" class="rounded-3xl bg-slate-50 p-5 leading-7 text-slate-700 dark:bg-slate-800/70 dark:text-slate-200">Choose a message from the left panel to load its content here.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── UNSUBSCRIBER PANEL ── -->
+      <section data-panel="unsubscriber" class="hidden space-y-5">
+        <div class="rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div><h3 class="text-lg font-semibold">Active newsletters</h3><p class="mt-1 text-sm text-slate-500">Filter subscriptions and remove them with one click.</p></div>
+            <div class="relative w-full md:max-w-sm">
+              <i data-lucide="search" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"></i>
+              <input id="newsletterSearch" type="text" placeholder="Search newsletters" class="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 outline-none focus:border-blue-400 dark:border-slate-700 dark:bg-slate-800" />
+            </div>
+          </div>
+          <div id="newsletterList" class="mt-5 grid gap-4 md:grid-cols-2"></div>
+        </div>
+      </section>
+
+      <!-- ── ANALYZER PANEL ── -->
+      <section data-panel="analyzer" class="hidden space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div><h3 class="text-lg font-semibold">Trash & Spam Analyzer</h3><p class="mt-1 text-sm text-slate-500">Risk-ranked messages ready for review and safe deletion.</p></div>
+          <button id="safeDeleteAll" class="rounded-2xl bg-red-500 px-5 py-3 text-sm font-semibold text-white hover:bg-red-600 transition-colors">Safe Delete All</button>
+        </div>
+        <div id="riskList" class="grid gap-4 xl:grid-cols-2"></div>
+      </section>
+
+      <!-- ── SETUP PANEL ── -->
+      <section data-panel="setup" class="hidden space-y-6">
+        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+          <h3 class="text-xl font-semibold">One-time Google Setup (5 minutes)</h3>
+          <p class="mt-2 text-slate-500 text-sm">Do this once, then paste your Client ID into index.html. No backend, no server, no cost.</p>
+          <ol class="mt-6 space-y-5">
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">1</span>
+              <div>
+                <p class="font-semibold">Go to Google Cloud Console</p>
+                <p class="mt-1 text-sm text-slate-500">Visit <a href="https://console.cloud.google.com" target="_blank" class="text-blue-500 underline">console.cloud.google.com</a> → Create a new project → name it <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">SmartEmailSorter</code></p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">2</span>
+              <div>
+                <p class="font-semibold">Enable Gmail API</p>
+                <p class="mt-1 text-sm text-slate-500">APIs & Services → Library → search <strong>Gmail API</strong> → Enable</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">3</span>
+              <div>
+                <p class="font-semibold">Create OAuth Consent Screen</p>
+                <p class="mt-1 text-sm text-slate-500">APIs & Services → OAuth Consent Screen → External → fill App name → Add scope: <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">gmail.readonly</code> → Add your Gmail as test user → Save</p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">4</span>
+              <div>
+                <p class="font-semibold">Create OAuth Client ID</p>
+                <p class="mt-1 text-sm text-slate-500">Credentials → Create Credentials → OAuth Client ID → <strong>Web application</strong><br/>
+                Authorised JavaScript origins: <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">https://YOUR_USERNAME.github.io</code><br/>
+                <span class="text-orange-500 font-medium">No redirect URI needed — leave it blank.</span></p>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">5</span>
+              <div>
+                <p class="font-semibold">Paste Client ID into index.html</p>
+                <p class="mt-1 text-sm text-slate-500">Copy the Client ID (looks like <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">123456789.apps.googleusercontent.com</code>)<br/>
+                Open <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">index.html</code> on GitHub → find this line near the top → replace <code class="rounded bg-slate-100 px-1 dark:bg-slate-800">YOUR_GOOGLE_CLIENT_ID_HERE</code>:</p>
+                <div class="mt-2 rounded-2xl bg-slate-950 p-4 text-xs text-emerald-400 overflow-auto dark:bg-black">
+                  &lt;meta name="google-client-id" content="<span class="text-yellow-400">PASTE_YOUR_CLIENT_ID_HERE</span>.apps.googleusercontent.com" /&gt;
+                </div>
+              </div>
+            </li>
+            <li class="flex gap-4">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-bold text-white">✓</span>
+              <div>
+                <p class="font-semibold">Done — Sign in with Google works!</p>
+                <p class="mt-1 text-sm text-slate-500">Push to GitHub, open your GitHub Pages URL, click Sign in with Google. Real emails will load in the Inbox tab.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div id="toastContainer" class="pointer-events-none fixed bottom-4 right-4 z-50 space-y-3"></div>
+
+<!-- ════════════════════════════════════════════════════════════
+     JAVASCRIPT
+════════════════════════════════════════════════════════════ -->
+<script>
+// ── DEMO DATA ──────────────────────────────────────────────────
+const DEMO_EMAILS = {
+  Primary: [
+    { from: 'Priya from LegalPrep', subject: 'Your exam schedule has been updated', time: '09:24 AM', body: 'We updated your upcoming exam timeline and moved the mock test review session to Friday. Your study checklist and hall-ticket reminders are now available in the portal.' },
+    { from: 'SmartDocs', subject: 'Contract summary is ready', time: 'Yesterday', body: 'Your uploaded contract has been sorted into the Legal folder. Our AI extracted key clauses, flagged deadlines, and prepared a quick summary for review.' }
+  ],
+  Social: [
+    { from: 'LinkedIn', subject: '7 people viewed your profile', time: '08:12 AM', body: 'Your profile activity increased this week. People from technology, legal research, and academic institutions viewed your recent updates.' },
+    { from: 'X Community', subject: 'Trending discussion in your network', time: 'Mon', body: 'Several discussions related to AI productivity and email automation are trending in your network.' }
+  ],
+  Updates: [
+    { from: 'GitHub', subject: 'Security alert on repository dependency', time: '10:05 AM', body: 'A dependency in your project was marked outdated. Review package recommendations and patch to the latest secure version.' },
+    { from: 'Notion', subject: 'Project timeline reminder', time: 'Sun', body: 'Your project board has three cards marked due this week.' }
+  ],
+  Forums: [
+    { from: 'Indie Hackers', subject: 'Top thread: building privacy-first inbox apps', time: '11:17 AM', body: 'Developers are discussing privacy-safe inbox products, focusing on OAuth, provider rate limits, and better user trust patterns.' },
+    { from: 'Stack Overflow', subject: 'Digest: Gmail API pagination tips', time: 'Sat', body: 'This weekly digest highlights best practices for batch reading email metadata and handling Gmail API message pagination.' }
+  ]
+};
+
+const NEWSLETTERS = [
+  { name: 'Daily Deals Hub', frequency: '12 emails/week', topic: 'Promo offers' },
+  { name: 'Tech World Weekly', frequency: '4 emails/week', topic: 'Technology roundup' },
+  { name: 'Travel Saver Club', frequency: '5 emails/week', topic: 'Discount alerts' },
+  { name: 'Fitness Digest', frequency: '3 emails/week', topic: 'Health tips' },
+  { name: 'ShopSmart Flash', frequency: '9 emails/week', topic: 'Limited offers' },
+  { name: 'Founder Brew', frequency: '2 emails/week', topic: 'Startup insights' }
+];
+
+const RISKS = [
+  { subject: 'Urgent: verify your bank account now', sender: 'alerts@bank-safe-check.net', badge: 'High Risk - Phishing', color: 'red', note: 'Spoofed sender domain, suspicious verification link, high urgency language.' },
+  { subject: 'Claim your gift voucher today', sender: 'promo@discount-zilla.biz', badge: 'Low Risk - Promo', color: 'orange', note: 'Promotional message with repetitive marketing language and multiple tracking links.' },
+  { subject: 'Password reset requested', sender: 'security@appleid-check.info', badge: 'High Risk - Phishing', color: 'red', note: 'Mismatch between display name and sending domain.' },
+  { subject: 'Summer sale catalog inside', sender: 'newsletter@retailplus.com', badge: 'Safe - Promo', color: 'emerald', note: 'Known sender, safe promotional content, candidate for bulk cleanup.' }
+];
+
+// ── APP STATE ──────────────────────────────────────────────────
+const state = {
+  view: 'overview',
+  category: 'Primary',
+  selectedEmail: null,
+  theme: localStorage.getItem('smart-email-theme') || 'light',
+  user: null,
+  accessToken: null,
+  realEmails: null
+};
+
+const TITLE_MAP = {
+  overview: 'Dashboard Overview',
+  inbox: 'Smart Sorter Inbox',
+  unsubscriber: 'One-Click Unsubscriber',
+  analyzer: 'Trash & Spam Analyzer',
+  setup: 'Setup Guide'
+};
+
+// ── GOOGLE IDENTITY SERVICES (client-side OAuth) ───────────────
+let tokenClient = null;
+
+function initGoogle() {
+  const clientId = document.querySelector('meta[name="google-client-id"]')?.content;
+  if (!clientId || clientId.includes('YOUR_GOOGLE_CLIENT_ID')) {
+    console.warn('Google Client ID not set. See Setup Guide tab.');
+    return;
+  }
+
+  // Token client — asks for Gmail access
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: clientId,
+    scope: 'https://www.googleapis.com/auth/gmail.readonly profile email',
+    callback: async (tokenResponse) => {
+      if (tokenResponse.error) {
+        showToast('Sign-in cancelled or failed', 'red');
+        return;
+      }
+      state.accessToken = tokenResponse.access_token;
+      // Get user profile
+      await loadUserProfile();
+      showToast('Gmail connected!', 'emerald');
+      fetchEmails();
+    }
+  });
+}
+
+function signIn() {
+  const clientId = document.querySelector('meta[name="google-client-id"]')?.content;
+  if (!clientId || clientId.includes('YOUR_GOOGLE_CLIENT_ID')) {
+    switchView('setup');
+    showToast('Please complete the setup first — see Setup Guide', 'orange');
+    return;
+  }
+  if (!tokenClient) {
+    showToast('Google auth not ready yet. Try again in 2 seconds.', 'orange');
+    return;
+  }
+  tokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function signOut() {
+  if (state.accessToken) {
+    google.accounts.oauth2.revoke(state.accessToken, () => {});
+  }
+  state.accessToken = null;
+  state.user = null;
+  state.realEmails = null;
+  updateAuthUI(false);
+  showInboxEmpty();
+  showToast('Signed out', 'blue');
+}
+
+async function loadUserProfile() {
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${state.accessToken}` }
+    });
+    const data = await res.json();
+    state.user = {
+      name: data.name,
+      email: data.email,
+      avatar: data.picture
+    };
+    updateAuthUI(true);
+  } catch (e) {
+    console.error('Profile fetch failed', e);
+  }
+}
+
+function updateAuthUI(loggedIn) {
+  document.getElementById('sidebarLoggedOut').classList.toggle('hidden', loggedIn);
+  document.getElementById('sidebarLoggedIn').classList.toggle('hidden', !loggedIn);
+  document.getElementById('authBanner').classList.toggle('hidden', loggedIn);
+  document.getElementById('headerPill').classList.toggle('hidden', !loggedIn);
+
+  if (loggedIn && state.user) {
+    document.getElementById('sidebarAvatar').src = state.user.avatar;
+    document.getElementById('sidebarName').textContent = state.user.name;
+    document.getElementById('sidebarEmail').textContent = state.user.email;
+    document.getElementById('headerPillName').textContent = state.user.name.split(' ')[0];
+  }
+  lucide.createIcons();
+}
+
+// ── GMAIL API ──────────────────────────────────────────────────
+async function fetchEmails() {
+  if (!state.accessToken) {
+    signIn();
+    return;
+  }
+
+  switchView('inbox');
+  showInboxLoading();
+
+  try {
+    // List inbox messages
+    const listRes = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=40&labelIds=INBOX',
+      { headers: { Authorization: `Bearer ${state.accessToken}` } }
+    );
+
+    if (listRes.status === 401) {
+      state.accessToken = null;
+      showToast('Session expired. Please sign in again.', 'orange');
+      signIn();
+      return;
+    }
+
+    const listData = await listRes.json();
+    const messages = listData.messages || [];
+
+    if (messages.length === 0) {
+      state.realEmails = { Primary: [] };
+      showInboxContent();
+      return;
+    }
+
+    // Fetch message details in parallel
+    const details = await Promise.all(
+      messages.map(({ id }) =>
+        fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
+          { headers: { Authorization: `Bearer ${state.accessToken}` } }
+        ).then(r => r.json()).catch(() => null)
+      )
+    );
+
+    const parsed = details.filter(Boolean).map(parseGmailMessage);
+    state.realEmails = categorizeEmails(parsed);
+
+    // Update stats
+    document.getElementById('statTotal').textContent = parsed.length.toLocaleString();
+    document.getElementById('statTotalSub').textContent = 'from your Gmail inbox';
+    document.getElementById('chartBadge').textContent = 'Live data';
+
+    showInboxContent();
+    showToast(`Loaded ${parsed.length} emails`, 'emerald');
+
+  } catch (err) {
+    console.error(err);
+    showToast('Failed to fetch emails. Try again.', 'red');
+    showInboxEmpty();
+  }
+}
+
+function parseGmailMessage(msg) {
+  const headers = msg.payload?.headers || [];
+  const get = name => headers.find(h => h.name.toLowerCase() === name)?.value || '';
+
+  const from = get('from');
+  const subject = get('subject') || '(no subject)';
+  const date = get('date');
+
+  const fromName = from.includes('<')
+    ? from.split('<')[0].trim().replace(/^"|"$/g, '')
+    : from.split('@')[0];
+
+  const dateObj = date ? new Date(date) : new Date();
+  const isToday = dateObj.toDateString() === new Date().toDateString();
+  const timeStr = isToday
+    ? dateObj.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+    : dateObj.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+
+  return {
+    id: msg.id,
+    from: fromName || from,
+    fromFull: from,
+    subject,
+    time: timeStr,
+    body: msg.snippet || '(no preview)',
+    labels: msg.labelIds || []
+  };
+}
+
+function categorizeEmails(emails) {
+  const cats = { Primary: [], Social: [], Updates: [], Forums: [], Promotions: [] };
+  const social = ['facebook', 'twitter', 'linkedin', 'instagram', 'youtube', 'x.com', 'reddit'];
+  const promo = ['deal', 'offer', 'sale', 'discount', 'promo', 'coupon', 'unsubscribe', '%off', 'newsletter'];
+  const updates = ['github', 'notion', 'jira', 'slack', 'trello', 'google', 'apple', 'microsoft', 'amazon', 'razorpay', 'paytm'];
+  const forums = ['stackoverflow', 'quora', 'medium', 'substack', 'indiehackers'];
+
+  emails.forEach(e => {
+    const txt = `${e.fromFull} ${e.subject} ${e.body}`.toLowerCase();
+    const lbl = e.labels;
+    if (lbl.includes('CATEGORY_SOCIAL'))      { cats.Social.push(e); return; }
+    if (lbl.includes('CATEGORY_PROMOTIONS'))  { cats.Promotions.push(e); return; }
+    if (lbl.includes('CATEGORY_UPDATES'))     { cats.Updates.push(e); return; }
+    if (lbl.includes('CATEGORY_FORUMS'))      { cats.Forums.push(e); return; }
+    if (social.some(d => txt.includes(d)))    { cats.Social.push(e); return; }
+    if (forums.some(d => txt.includes(d)))    { cats.Forums.push(e); return; }
+    if (updates.some(d => txt.includes(d)))   { cats.Updates.push(e); return; }
+    if (promo.some(k => txt.includes(k)))     { cats.Promotions.push(e); return; }
+    cats.Primary.push(e);
+  });
+
+  Object.keys(cats).forEach(k => { if (!cats[k].length) delete cats[k]; });
+  return cats;
+}
+
+// ── INBOX STATES ───────────────────────────────────────────────
+function showInboxLoading() {
+  document.getElementById('inboxLoading').classList.remove('hidden');
+  document.getElementById('inboxLoading').classList.add('flex');
+  document.getElementById('inboxEmpty').classList.add('hidden');
+  document.getElementById('inboxContent').classList.add('hidden');
+  document.getElementById('inboxContent').classList.remove('grid');
+}
+
+function showInboxEmpty() {
+  document.getElementById('inboxLoading').classList.add('hidden');
+  document.getElementById('inboxLoading').classList.remove('flex');
+  document.getElementById('inboxEmpty').classList.remove('hidden');
+  document.getElementById('inboxContent').classList.add('hidden');
+  document.getElementById('inboxContent').classList.remove('grid');
+}
+
+function showInboxContent() {
+  document.getElementById('inboxLoading').classList.add('hidden');
+  document.getElementById('inboxLoading').classList.remove('flex');
+  document.getElementById('inboxEmpty').classList.add('hidden');
+  document.getElementById('inboxContent').classList.remove('hidden');
+  document.getElementById('inboxContent').classList.add('grid');
+
+  const data = state.realEmails || DEMO_EMAILS;
+  state.category = Object.keys(data)[0];
+  state.selectedEmail = data[state.category]?.[0] || null;
+  renderTabs(data);
+  renderEmails(data);
+  renderPreview();
+}
+
+// ── RENDER ─────────────────────────────────────────────────────
+function renderTabs(data) {
+  const holder = document.getElementById('categoryTabs');
+  holder.innerHTML = '';
+  Object.keys(data).forEach(cat => {
+    const btn = document.createElement('button');
+    btn.className = `rounded-2xl px-4 py-2 text-sm font-semibold transition-colors ${state.category === cat ? 'bg-blue-600 text-white' : 'border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'}`;
+    btn.textContent = `${cat} (${data[cat].length})`;
+    btn.onclick = () => {
+      state.category = cat;
+      state.selectedEmail = data[cat][0];
+      renderTabs(data);
+      renderEmails(data);
+      renderPreview();
+    };
+    holder.appendChild(btn);
+  });
+}
+
+function renderEmails(data) {
+  const list = document.getElementById('emailList');
+  list.innerHTML = '';
+  const mails = data[state.category] || [];
+  if (!mails.length) {
+    list.innerHTML = '<p class="py-6 text-center text-sm text-slate-400">No emails here.</p>';
+    return;
+  }
+  mails.forEach(mail => {
+    const active = state.selectedEmail?.subject === mail.subject;
+    const btn = document.createElement('button');
+    btn.className = `email-row w-full rounded-2xl border p-4 text-left transition ${active ? 'active border-blue-300 dark:border-blue-500' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'}`;
+    btn.innerHTML = `<div class="flex items-start justify-between gap-3"><div class="min-w-0"><p class="truncate font-semibold">${mail.from}</p><p class="mt-1 truncate text-sm text-slate-500">${mail.subject}</p></div><span class="shrink-0 text-xs text-slate-400">${mail.time}</span></div>`;
+    btn.onclick = () => { state.selectedEmail = mail; renderEmails(data); renderPreview(); };
+    list.appendChild(btn);
+  });
+}
+
+function renderPreview() {
+  if (!state.selectedEmail) return;
+  document.getElementById('previewSubject').textContent = state.selectedEmail.subject;
+  document.getElementById('previewFrom').textContent = `From: ${state.selectedEmail.from}`;
+  document.getElementById('previewTime').textContent = `Time: ${state.selectedEmail.time}`;
+  document.getElementById('previewBody').textContent = state.selectedEmail.body;
+}
+
+function renderNewsletters(filter = '') {
+  const list = document.getElementById('newsletterList');
+  list.innerHTML = '';
+  NEWSLETTERS
+    .filter(n => n.name.toLowerCase().includes(filter.toLowerCase()) || n.topic.toLowerCase().includes(filter.toLowerCase()))
+    .forEach(item => {
+      const card = document.createElement('article');
+      card.className = 'rounded-3xl border border-slate-200 p-5 dark:border-slate-800';
+      card.innerHTML = `
+        <div class="flex items-start justify-between gap-3">
+          <div><h4 class="font-semibold">${item.name}</h4><p class="mt-1 text-sm text-slate-500">${item.topic} • ${item.frequency}</p></div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Active</span>
+        </div>
+        <div class="mt-5 flex gap-3">
+          <button class="unsub flex-1 rounded-2xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-600 transition-colors">Unsubscribe</button>
+          <button class="keep rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">Keep</button>
+        </div>`;
+      card.querySelector('.unsub').onclick = () => showToast(`Unsubscribed from ${item.name}`, 'orange');
+      card.querySelector('.keep').onclick = () => showToast(`Kept ${item.name}`, 'emerald');
+      list.appendChild(card);
+    });
+}
+
+function renderRisks() {
+  const list = document.getElementById('riskList');
+  list.innerHTML = '';
+  RISKS.forEach(item => {
+    const badge = item.color === 'red' ? 'bg-red-500/10 text-red-500' : item.color === 'orange' ? 'bg-orange-500/10 text-orange-500' : 'bg-emerald-500/10 text-emerald-500';
+    const card = document.createElement('article');
+    card.className = 'rounded-3xl border border-slate-200 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900';
+    card.innerHTML = `
+      <div class="flex items-start justify-between gap-3">
+        <div><p class="text-sm text-slate-500">${item.sender}</p><h4 class="mt-1 text-lg font-semibold">${item.subject}</h4></div>
+        <span class="rounded-full px-3 py-1 text-xs font-semibold ${badge}">${item.badge}</span>
+      </div>
+      <p class="mt-4 text-sm text-slate-600 dark:text-slate-300">${item.note}</p>`;
+    list.appendChild(card);
+  });
+}
+
+function renderChart() {
+  const ctx = document.getElementById('categoryChart');
+  window.categoryChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Primary', 'Social', 'Updates', 'Forums', 'Spam'],
+      datasets: [{ data: [34, 18, 24, 12, 12], backgroundColor: ['#3B82F6','#6366F1','#10B981','#F59E0B','#EF4444'], borderWidth: 0, hoverOffset: 10 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: state.theme === 'dark' ? '#cbd5e1' : '#334155', boxWidth: 12, padding: 18 } } },
+      cutout: '68%'
+    }
+  });
+}
+
+// ── THEME ──────────────────────────────────────────────────────
+function setTheme(theme) {
+  state.theme = theme;
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('smart-email-theme', theme);
+  document.getElementById('themeToggle').innerHTML = theme === 'dark'
+    ? '<i data-lucide="sun" class="h-5 w-5"></i>'
+    : '<i data-lucide="moon-star" class="h-5 w-5"></i>';
+  lucide.createIcons();
+  if (window.categoryChartInstance) { window.categoryChartInstance.destroy(); renderChart(); }
+}
+
+// ── VIEW SWITCH ────────────────────────────────────────────────
+function switchView(view) {
+  state.view = view;
+  document.querySelectorAll('[data-panel]').forEach(p => p.classList.toggle('hidden', p.dataset.panel !== view));
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.toggle('active', l.dataset.view === view));
+  document.getElementById('headerTitle').textContent = TITLE_MAP[view];
+  document.getElementById('sidebar').classList.add('-translate-x-full');
+
+  if (view === 'inbox') {
+    if (!state.accessToken) showInboxEmpty();
+    else if (state.realEmails) showInboxContent();
+    else fetchEmails();
+  }
+  lucide.createIcons();
+}
+
+// ── TOAST ──────────────────────────────────────────────────────
+function showToast(msg, tone = 'blue') {
+  const colors = { blue: 'bg-blue-600', red: 'bg-red-500', emerald: 'bg-emerald-500', orange: 'bg-orange-500' };
+  const t = document.createElement('div');
+  t.className = `toast-show pointer-events-auto rounded-2xl px-4 py-3 text-sm font-semibold text-white shadow-soft ${colors[tone]}`;
+  t.textContent = msg;
+  document.getElementById('toastContainer').appendChild(t);
+  setTimeout(() => t.remove(), 2800);
+}
+
+// ── EVENT LISTENERS ────────────────────────────────────────────
+document.querySelectorAll('.sidebar-link').forEach(l => l.addEventListener('click', () => switchView(l.dataset.view)));
+document.getElementById('newsletterSearch').addEventListener('input', e => renderNewsletters(e.target.value));
+document.getElementById('themeToggle').addEventListener('click', () => setTheme(state.theme === 'dark' ? 'light' : 'dark'));
+document.getElementById('safeDeleteAll').addEventListener('click', () => showToast('Trash and spam queue safely deleted', 'red'));
+document.getElementById('openSidebar').addEventListener('click', () => document.getElementById('sidebar').classList.remove('-translate-x-full'));
+document.getElementById('closeSidebar').addEventListener('click', () => document.getElementById('sidebar').classList.add('-translate-x-full'));
+
+// ── INIT ───────────────────────────────────────────────────────
+setTheme(state.theme);
+renderNewsletters();
+renderRisks();
+renderChart();
+lucide.createIcons();
+
+// Init Google after GIS library loads
+window.addEventListener('load', () => {
+  // Small delay to ensure GIS script is ready
+  setTimeout(initGoogle, 500);
+});
+</script>
+</body>
+</html>
